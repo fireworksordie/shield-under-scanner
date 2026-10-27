@@ -1,4 +1,4 @@
-# Shield Overscan Profiles
+# sus (shield-under-scanner)
 
 Android TV app for NVIDIA Shield: live overscan slider, saved profiles, and a headless intent API for other tools.
 Needs Shizuku running (wireless debugging start).

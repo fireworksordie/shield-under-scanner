@@ -3,6 +3,7 @@ package dev.cdav.overscantoggle
 import android.app.Activity
 import android.content.Context
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -13,6 +14,7 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -109,8 +111,17 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.parseColor("#101820"))
             addView(root)
         }
+        // Green frame on the very edge of the screen, so the visible picture edge (after underscan) is easy to see.
+        val edge = FrameLayout(this).apply {
+            addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            foreground = GradientDrawable().apply {
+                setColor(Color.TRANSPARENT)
+                setStroke((6 * resources.displayMetrics.density).toInt(), Color.parseColor("#76B900"))
+            }
+        }
 
-        root.addView(label("Overscan", 34f))
+        root.addView(label("sus", 40f).apply { typeface = android.graphics.Typeface.MONOSPACE })
+        root.addView(label("shield-under-scanner", 16f).apply { setTextColor(Color.LTGRAY) })
         status = label("", 16f).apply { setTextColor(Color.parseColor("#76B900")) }
         root.addView(status)
 
@@ -198,7 +209,7 @@ class MainActivity : Activity() {
             14f
         ).apply { setTextColor(Color.LTGRAY); setPadding(0, 32, 0, 0) })
 
-        setContentView(scroll)
+        setContentView(edge)
         showValue(0)
         renderProfiles()
 

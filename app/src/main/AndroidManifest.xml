@@ -6,8 +6,8 @@
 
     <application
         android:icon="@drawable/ic_launcher"
-        android:banner="@drawable/ic_launcher"
-        android:label="Overscan Toggle"
+        android:banner="@drawable/banner"
+        android:label="sus"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
         <!-- Shizuku binder provider -->
@@ -20,7 +20,7 @@
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <!-- Slider + profile manager -->
-        <activity android:name=".MainActivity" android:exported="true" android:label="Overscan" android:launchMode="singleTask">
+        <activity android:name=".MainActivity" android:exported="true" android:label="sus" android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -32,7 +32,7 @@
         <activity
             android:name=".ApplyActivity"
             android:exported="true"
-            android:label="Overscan Next"
+            android:label="sus next"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:excludeFromRecents="true"
             android:noHistory="true">
