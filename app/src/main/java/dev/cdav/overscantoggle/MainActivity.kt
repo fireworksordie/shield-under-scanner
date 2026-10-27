@@ -25,7 +25,7 @@ class MainActivity : Activity() {
     private lateinit var flipBtn: Button
 
     private val applyRunnable = Runnable {
-        Backend.submit(this, seek.progress) { err ->
+        Backend.submit(this, seek.progress, true) { err ->
             runOnUiThread { if (err != null) status.text = "Apply failed: $err" else refreshStatus() }
         }
     }

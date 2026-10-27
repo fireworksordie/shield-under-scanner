@@ -113,17 +113,19 @@ object Backend {
         }
     }
 
-    private fun applyKeys(ctx: Context, n: Int): String? {
+    private fun applyKeys(ctx: Context, n: Int, bringBack: Boolean): String? {
         val inc = if (flipped(ctx)) 19 else 20
         val dec = if (flipped(ctx)) 20 else 19
         val keys = if (n == 0) "$inc $dec" else List(n) { "$inc" }.joinToString(" ")
-        val cmd = "am start -n $STOCK_ACTIVITY; sleep 1; input keyevent $keys; sleep 1; input keyevent 4"
+        // -W waits until the stock screen is up, so no long fixed sleep is needed.
+        val back = if (bringBack) "; am start -n dev.cdav.overscantoggle/.MainActivity" else ""
+        val cmd = "am start -W -n $STOCK_ACTIVITY >/dev/null; sleep 0.3; input keyevent $keys; sleep 0.3; input keyevent 4$back"
         val rc = newProcess(arrayOf("sh", "-c", cmd)).waitFor()
         return if (rc == 0) null else "Key command failed (exit $rc)"
     }
 
     /** Blocking apply. Returns null on success, or an error message. */
-    fun applyNow(ctx: Context, n: Int): String? {
+    fun applyNow(ctx: Context, n: Int, bringBack: Boolean = false): String? {
         val app = ctx.applicationContext
         ensure(app)
         val v = n.coerceIn(0, 300)
@@ -131,7 +133,7 @@ object Backend {
             if (direct) {
                 val r = rawRequest("S $v")
                 if (r.startsWith("@OK")) null else r.removePrefix("@ERR ")
-            } else applyKeys(app, v)
+            } else applyKeys(app, v, bringBack)
         } catch (t: Throwable) {
             t.message ?: t.toString()
         }
@@ -140,12 +142,12 @@ object Backend {
     }
 
     /** Non-blocking; if called repeatedly (slider drag) only the newest value is applied. */
-    fun submit(ctx: Context, n: Int, done: (String?) -> Unit) {
+    fun submit(ctx: Context, n: Int, bringBack: Boolean = false, done: (String?) -> Unit) {
         pending.set(n)
         val app = ctx.applicationContext
         exec.execute {
             val v = pending.getAndSet(-1)
-            if (v >= 0) done(applyNow(app, v))
+            if (v >= 0) done(applyNow(app, v, bringBack))
         }
     }
 }
