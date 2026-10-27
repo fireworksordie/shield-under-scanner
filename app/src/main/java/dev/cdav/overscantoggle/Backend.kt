@@ -117,9 +117,10 @@ object Backend {
         val inc = if (flipped(ctx)) 19 else 20
         val dec = if (flipped(ctx)) 20 else 19
         val keys = if (n == 0) "$inc $dec" else List(n) { "$inc" }.joinToString(" ")
+        // The stock screen keeps its slider position between launches, so kill it first to guarantee it starts at 0.
         // -W waits until the stock screen is up, so no long fixed sleep is needed.
         val back = if (bringBack) "; am start -n dev.cdav.overscantoggle/.MainActivity" else ""
-        val cmd = "am start -W -n $STOCK_ACTIVITY >/dev/null; sleep 0.3; input keyevent $keys; sleep 0.3; input keyevent 4$back"
+        val cmd = "am force-stop com.nvidia.overscancomp; am start -W -n $STOCK_ACTIVITY >/dev/null; sleep 0.3; input keyevent $keys; sleep 0.3; input keyevent 4$back"
         val rc = newProcess(arrayOf("sh", "-c", cmd)).waitFor()
         return if (rc == 0) null else "Key command failed (exit $rc)"
     }
