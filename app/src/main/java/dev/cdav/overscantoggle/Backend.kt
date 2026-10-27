@@ -1,30 +1,36 @@
 package dev.cdav.overscantoggle
 
-import android.content.Context
 import android.content.pm.PackageManager
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import rikka.shizuku.Shizuku
 
 /**
- * Applies an overscan value (tenths of a percent, 25 = 2.5%) through Shizuku.
- *  - Direct mode:   a shell-user helper process calls NVIDIA's display HAL. Instant, works while you slide.
- *  - Key mode:      fallback that drives the stock OverscanComp app with key presses. Slow, applies after you stop.
+ * Sets the Shield's overscan compensation (underscan) in tenths of a percent (25 = 2.5%).
+ *
+ * The only writer for this setting is NVIDIA's OverscanComp app, which runs as the system user and talks to the
+ * display HAL; neither the shell user nor a normal app may do that. So we operate that app's slider with key
+ * presses, and treat the persisted value as the source of truth:
+ *
+ *   1. read the current value from the system property the stock app maintains,
+ *   2. open the stock screen (its slider starts at that same value),
+ *   3. press exactly the number of steps needed, in the right direction,
+ *   4. read the property again to confirm, and correct if it did not land on the target.
  */
 object Backend {
-    private const val PREFS = "overscan"
-    private const val STOCK_ACTIVITY = "com.nvidia.overscancomp/.OverscanCompActivity"
+    const val MAX = 300                                       // 30.0%, the stock slider's range
 
-    @Volatile var direct = false
-    @Volatile var note = ""
-    @Volatile var tenths = -1
+    private const val PROP = "persist.vendor.tegra.hdmi.underscan"   // fraction: 0.138 = 13.8%
+    private const val STOCK_PKG = "com.nvidia.overscancomp"
+    private const val STOCK_ACTIVITY = "$STOCK_PKG/.OverscanCompActivity"
+    private const val KEY_INCREASE = 20                       // DPAD_DOWN raises the percentage (shrinks the picture)
+    private const val KEY_DECREASE = 19                       // DPAD_UP lowers it
+    private const val KEY_BACK = 4
+    private const val OPEN_SETTLE_MS = 600L                   // time for the stock screen to read the hardware value
+    private const val MAX_ROUNDS = 3
 
-    private var proc: Process? = null
-    private var out: OutputStreamWriter? = null
-    private var inp: BufferedReader? = null
     private val exec = Executors.newSingleThreadExecutor()
     private val pending = AtomicInteger(-1)
 
@@ -33,17 +39,6 @@ object Backend {
     fun running() = Shizuku.pingBinder()
     fun granted() = running() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
     fun requestPermission() = Shizuku.requestPermission(0)
-
-    fun flipped(ctx: Context) = ctx.getSharedPreferences(PREFS, 0).getBoolean("flip", false)
-    fun setFlipped(ctx: Context, v: Boolean) = ctx.getSharedPreferences(PREFS, 0).edit().putBoolean("flip", v).apply()
-
-    fun lastKnown(ctx: Context): Int =
-        if (tenths >= 0) tenths else ctx.getSharedPreferences(PREFS, 0).getInt("cur", 0)
-
-    private fun remember(ctx: Context, t: Int) {
-        tenths = t
-        ctx.getSharedPreferences(PREFS, 0).edit().putInt("cur", t).apply()
-    }
 
     private fun newProcess(args: Array<String>): Process {
         // Shizuku.newProcess is private in API 13; reflection is the documented workaround.
@@ -54,129 +49,72 @@ object Backend {
         return m.invoke(null, args, null, null) as Process
     }
 
-    /** One request/response with the helper. Skips any non-protocol output (JVM noise). */
+    /** Runs a command as the shell user through Shizuku and returns its exit code and stdout. */
+    private fun shell(cmd: String): Pair<Int, String> {
+        val p = newProcess(arrayOf("sh", "-c", cmd))
+        val out = p.inputStream.bufferedReader().use { it.readText() }
+        return p.waitFor() to out
+    }
+
+    /** Current overscan in tenths of a percent, read from the system property; null if unreadable. */
+    fun readCurrent(): Int? {
+        val (rc, out) = shell("getprop $PROP")
+        if (rc != 0) return null
+        val text = out.trim()
+        if (text.isEmpty()) return 0                          // never set: no compensation
+        val fraction = text.toFloatOrNull() ?: return null
+        return (fraction * 1000f).roundToInt().coerceIn(0, MAX)
+    }
+
+    private fun press(key: Int, count: Int) {
+        if (count <= 0) return
+        shell("input keyevent " + List(count) { key }.joinToString(" "))
+    }
+
+    /** Polls until the property reaches [target] or the timeout passes; returns the last value read. */
+    private fun awaitValue(target: Int, timeoutMs: Long): Int? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var last: Int? = readCurrent()
+        while (last != target && System.currentTimeMillis() < deadline) {
+            Thread.sleep(100)
+            last = readCurrent()
+        }
+        return last
+    }
+
+    /** Blocking. Returns null on success, or an error message. [bringBack] returns to this app afterwards. */
     @Synchronized
-    private fun rawRequest(line: String): String {
+    fun applyNow(target: Int, bringBack: Boolean = false): String? {
+        val t = target.coerceIn(0, MAX)
+        var cur = try { readCurrent() } catch (e: Exception) { null }
+            ?: return "Could not read the current overscan value"
+        if (cur == t) return null
+
         return try {
-            out!!.write(line + "\n")
-            out!!.flush()
-            var noise = ""
-            while (true) {
-                val l = inp!!.readLine() ?: return "@ERR helper exited. $noise"
-                if (l.startsWith("@")) return l
-                noise = l
+            shell("am force-stop $STOCK_PKG; am start -W -n $STOCK_ACTIVITY")
+            Thread.sleep(OPEN_SETTLE_MS)
+
+            var round = 0
+            while (cur != t && round < MAX_ROUNDS) {
+                val delta = t - cur
+                press(if (delta > 0) KEY_INCREASE else KEY_DECREASE, abs(delta))
+                cur = awaitValue(t, 1500L + abs(delta) * 15L) ?: cur
+                round++
             }
-            ""
-        } catch (t: Throwable) {
-            proc?.destroy(); proc = null
-            "@ERR ${t.message}"
-        }
-    }
 
-    /** Shizuku's remote process throws IllegalArgumentException (not IllegalThreadStateException) while running. */
-    private fun helperAlive(): Boolean {
-        val p = proc ?: return false
-        return try {
-            p.exitValue()
-            false
-        } catch (t: Throwable) {
-            true
+            shell("input keyevent $KEY_BACK" + if (bringBack) "; am start -n dev.cdav.overscantoggle/.MainActivity" else "")
+            if (cur == t) null else "Ended at ${fmt(cur)}, wanted ${fmt(t)}"
+        } catch (e: Exception) {
+            e.message ?: e.toString()
         }
-    }
-
-    /** Starts the helper if needed and works out which mode we are in. Call off the main thread. */
-    @Synchronized
-    fun ensure(ctx: Context) {
-        if (helperAlive()) return
-        direct = false
-        try {
-            val apk = ctx.applicationContext.applicationInfo.sourceDir
-            val p = newProcess(
-                arrayOf(
-                    "sh", "-c",
-                    "exec app_process -Djava.class.path=$apk /system/bin --nice-name=overscan_helper dev.cdav.overscantoggle.Helper 2>&1"
-                )
-            )
-            proc = p
-            out = OutputStreamWriter(p.outputStream)
-            inp = BufferedReader(InputStreamReader(p.inputStream))
-            val r = rawRequest("G")
-            if (r.startsWith("@VAL ")) {
-                direct = true
-                tenths = r.substring(5).trim().toInt()
-                note = "Direct mode (live preview)"
-            } else {
-                note = "Key-press fallback. Direct call failed: ${r.removePrefix("@ERR ")}"
-            }
-        } catch (t: Throwable) {
-            note = "Could not start helper: ${t.message}"
-        }
-    }
-
-    private fun applyKeys(ctx: Context, n: Int, bringBack: Boolean): String? {
-        val inc = if (flipped(ctx)) 19 else 20
-        val dec = if (flipped(ctx)) 20 else 19
-        // The stock screen opens with its slider at the CURRENT hardware value and logs it
-        // ("percentageToSeekbarVal: percentage=<pct>"). Read that, then press exactly the steps needed.
-        // If the value can't be read, fall back to slamming the slider to the nearer end first.
-        val rail = (if (n <= 150) List(300) { dec } + List(n) { inc } else List(300) { inc } + List(300 - n) { dec })
-            .joinToString(" ")
-        val back = if (bringBack) "; am start -n dev.cdav.overscantoggle/.MainActivity" else ""
-        val script = """
-am force-stop com.nvidia.overscancomp
-logcat -c
-am start -W -n $STOCK_ACTIVITY >/dev/null
-sleep 0.6
-T=$n
-v=§(logcat -d -s OverscanCompActivity | grep -m1 'percentageToSeekbarVal: percentage=' | sed 's/.*percentage=//')
-OK=0
-if [ -n "§v" ]; then
-  case "§v" in *.*) ;; *) v="§v.0";; esac
-  ip=§{v%%.*}; fp="§{v#*.}00"
-  d1=§(echo "§fp" | cut -c1); d2=§(echo "§fp" | cut -c2)
-  case "§ip§d1§d2" in ''|*[!0-9]*) OK=0;; *) OK=1;; esac
-fi
-if [ "§OK" = 1 ]; then
-  cur=§((ip*10+d1)); [ "§d2" -ge 5 ] && cur=§((cur+1))
-  if [ "§cur" -lt "§T" ]; then d=§((T-cur)); K=$inc; else d=§((cur-T)); K=$dec; fi
-  keys=""; i=0
-  while [ "§i" -lt "§d" ]; do keys="§keys §K"; i=§((i+1)); done
-  if [ -n "§keys" ]; then input keyevent §keys; fi
-else
-  input keyevent $rail
-fi
-sleep 0.3
-input keyevent 4$back
-""".trimIndent().replace('§', '$')
-        val cmd = script
-        val rc = newProcess(arrayOf("sh", "-c", cmd)).waitFor()
-        return if (rc == 0) null else "Key command failed (exit $rc)"
-    }
-
-    /** Blocking apply. Returns null on success, or an error message. */
-    fun applyNow(ctx: Context, n: Int, bringBack: Boolean = false): String? {
-        val app = ctx.applicationContext
-        ensure(app)
-        val v = n.coerceIn(0, 300)
-        val err = try {
-            if (direct) {
-                val r = rawRequest("S $v")
-                if (r.startsWith("@OK")) null else r.removePrefix("@ERR ")
-            } else applyKeys(app, v, bringBack)
-        } catch (t: Throwable) {
-            t.message ?: t.toString()
-        }
-        if (err == null) remember(app, v)
-        return err
     }
 
     /** Non-blocking; if called repeatedly (slider drag) only the newest value is applied. */
-    fun submit(ctx: Context, n: Int, bringBack: Boolean = false, done: (String?) -> Unit) {
-        pending.set(n)
-        val app = ctx.applicationContext
+    fun submit(target: Int, bringBack: Boolean = false, done: (String?) -> Unit) {
+        pending.set(target)
         exec.execute {
             val v = pending.getAndSet(-1)
-            if (v >= 0) done(applyNow(app, v, bringBack))
+            if (v >= 0) done(applyNow(v, bringBack))
         }
     }
 }

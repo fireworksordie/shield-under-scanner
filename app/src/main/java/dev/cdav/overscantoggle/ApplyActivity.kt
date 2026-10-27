@@ -14,7 +14,7 @@ import android.widget.Toast
  *   (launcher icon / no data)     same as next
  *
  * Intent extras work too, with action dev.cdav.overscantoggle.APPLY:
- *   profile (String), tenths (int), next (boolean)
+ *   profile (String), tenths (int)
  */
 class ApplyActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,10 +37,9 @@ class ApplyActivity : Activity() {
                     val p = Profiles.find(this, profileName)
                     if (p == null) "No profile named \"$profileName\"" else run(p.name, p.t)
                 }
-                rawValue != null -> run(Backend.fmt(rawValue.coerceIn(0, 300)), rawValue)
+                rawValue != null -> run(Backend.fmt(rawValue.coerceIn(0, Backend.MAX)), rawValue)
                 else -> {
-                    Backend.ensure(this)
-                    val p = Profiles.next(this, Backend.lastKnown(this))
+                    val p = Profiles.next(this, Backend.readCurrent() ?: 0)
                     if (p == null) "No saved profiles yet" else run(p.name, p.t)
                 }
             }
@@ -52,7 +51,7 @@ class ApplyActivity : Activity() {
     }
 
     private fun run(label: String, t: Int): String {
-        val err = Backend.applyNow(this, t)
-        return if (err == null) "Overscan: $label (${Backend.fmt(t)})" else "Overscan failed: $err"
+        val err = Backend.applyNow(t)
+        return if (err == null) "Overscan: $label (${Backend.fmt(Backend.readCurrent() ?: t)})" else "Overscan failed: $err"
     }
 }

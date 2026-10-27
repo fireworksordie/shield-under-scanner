@@ -16,17 +16,20 @@ import android.widget.TextView
 import rikka.shizuku.Shizuku
 
 class MainActivity : Activity() {
+    private companion object {
+        const val APPLY_DELAY_MS = 700L
+    }
+
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var status: TextView
     private lateinit var valueText: TextView
     private lateinit var seek: SeekBar
     private lateinit var nameEdit: EditText
     private lateinit var list: LinearLayout
-    private lateinit var flipBtn: Button
 
     private val applyRunnable = Runnable {
-        Backend.submit(this, seek.progress, true) { err ->
-            runOnUiThread { if (err != null) status.text = "Apply failed: $err" else refreshStatus() }
+        Backend.submit(seek.progress, true) { err ->
+            runOnUiThread { status.text = err?.let { "Apply failed: $it" } ?: "Applied ${Backend.fmt(seek.progress)}" }
         }
     }
 
@@ -66,14 +69,14 @@ class MainActivity : Activity() {
         valueText = label("0.0%", 48f).apply { setPadding(0, 24, 0, 0) }
         root.addView(valueText)
         seek = SeekBar(this).apply {
-            max = 300
+            max = Backend.MAX
             keyProgressIncrement = 5
             isFocusable = true
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
                     valueText.text = Backend.fmt(p)
-                    if (fromUser) schedule(if (Backend.direct) 20L else 700L)
+                    if (fromUser) schedule(APPLY_DELAY_MS)
                 }
                 override fun onStartTrackingTouch(s: SeekBar) {}
                 override fun onStopTrackingTouch(s: SeekBar) {}
@@ -85,10 +88,6 @@ class MainActivity : Activity() {
         fine.addView(button("-0.1") { nudge(-1) })
         fine.addView(button("+0.1") { nudge(1) })
         fine.addView(button("Reset to 0") { seek.progress = 0; schedule(0) })
-        flipBtn = button("Flip key direction") {
-            Backend.setFlipped(this, !Backend.flipped(this)); refreshStatus()
-        }
-        fine.addView(flipBtn)
         root.addView(fine)
 
         // Save as profile
@@ -137,28 +136,26 @@ class MainActivity : Activity() {
     }
 
     private fun nudge(d: Int) {
-        seek.progress = (seek.progress + d).coerceIn(0, 300)
-        schedule(if (Backend.direct) 20L else 700L)
+        seek.progress = (seek.progress + d).coerceIn(0, Backend.MAX)
+        schedule(APPLY_DELAY_MS)
     }
 
-    /** Check Shizuku, request permission if needed, start the helper, sync the slider. */
+    /** Check Shizuku, request permission if needed, then sync the slider with the current hardware value. */
     private fun start() {
         if (!Backend.running()) { status.text = "Shizuku is not running. Start it, then reopen this app."; return }
         if (!Backend.granted()) { status.text = "Requesting Shizuku permission..."; Backend.requestPermission(); return }
-        status.text = "Starting helper..."
         Thread {
-            Backend.ensure(this)
+            val cur = Backend.readCurrent()
             runOnUiThread {
-                seek.progress = Backend.lastKnown(this).coerceIn(0, 300)
-                valueText.text = Backend.fmt(seek.progress)
-                refreshStatus()
+                if (cur == null) {
+                    status.text = "Could not read the current overscan value."
+                } else {
+                    seek.progress = cur
+                    valueText.text = Backend.fmt(cur)
+                    status.text = "Current: ${Backend.fmt(cur)}. Changes apply about a second after you stop sliding."
+                }
             }
         }.start()
-    }
-
-    private fun refreshStatus() {
-        status.text = Backend.note.ifEmpty { "Ready" }
-        flipBtn.visibility = if (Backend.direct) android.view.View.GONE else android.view.View.VISIBLE
     }
 
     private fun renderProfiles() {
