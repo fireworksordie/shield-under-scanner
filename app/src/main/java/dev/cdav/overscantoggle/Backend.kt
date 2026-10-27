@@ -73,10 +73,21 @@ object Backend {
         }
     }
 
+    /** Shizuku's remote process throws IllegalArgumentException (not IllegalThreadStateException) while running. */
+    private fun helperAlive(): Boolean {
+        val p = proc ?: return false
+        return try {
+            p.exitValue()
+            false
+        } catch (t: Throwable) {
+            true
+        }
+    }
+
     /** Starts the helper if needed and works out which mode we are in. Call off the main thread. */
     @Synchronized
     fun ensure(ctx: Context) {
-        if (proc?.isAlive == true) return
+        if (helperAlive()) return
         direct = false
         try {
             val apk = ctx.applicationContext.applicationInfo.sourceDir
