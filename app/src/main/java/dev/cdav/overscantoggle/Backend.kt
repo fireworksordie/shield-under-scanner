@@ -116,15 +116,39 @@ object Backend {
     private fun applyKeys(ctx: Context, n: Int, bringBack: Boolean): String? {
         val inc = if (flipped(ctx)) 19 else 20
         val dec = if (flipped(ctx)) 20 else 19
-        // The stock screen opens with its slider at the CURRENT hardware value, not 0. So first slam the slider
-        // to the nearer end (300 presses is always enough; extra presses are ignored), then step to the target.
-        val seq = if (n <= 150) List(300) { dec } + List(n) { inc }
-                  else List(300) { inc } + List(300 - n) { dec }
-        val keys = seq.joinToString(" ")
-        // Kill the stock screen first so it always starts clean.
-        // -W waits until the stock screen is up, so no long fixed sleep is needed.
+        // The stock screen opens with its slider at the CURRENT hardware value and logs it
+        // ("percentageToSeekbarVal: percentage=<pct>"). Read that, then press exactly the steps needed.
+        // If the value can't be read, fall back to slamming the slider to the nearer end first.
+        val rail = (if (n <= 150) List(300) { dec } + List(n) { inc } else List(300) { inc } + List(300 - n) { dec })
+            .joinToString(" ")
         val back = if (bringBack) "; am start -n dev.cdav.overscantoggle/.MainActivity" else ""
-        val cmd = "am force-stop com.nvidia.overscancomp; am start -W -n $STOCK_ACTIVITY >/dev/null; sleep 0.6; input keyevent $keys; sleep 0.3; input keyevent 4$back"
+        val script = """
+am force-stop com.nvidia.overscancomp
+logcat -c
+am start -W -n $STOCK_ACTIVITY >/dev/null
+sleep 0.6
+T=$n
+v=§(logcat -d -s OverscanCompActivity | grep -m1 'percentageToSeekbarVal: percentage=' | sed 's/.*percentage=//')
+OK=0
+if [ -n "§v" ]; then
+  case "§v" in *.*) ;; *) v="§v.0";; esac
+  ip=§{v%%.*}; fp="§{v#*.}00"
+  d1=§(echo "§fp" | cut -c1); d2=§(echo "§fp" | cut -c2)
+  case "§ip§d1§d2" in ''|*[!0-9]*) OK=0;; *) OK=1;; esac
+fi
+if [ "§OK" = 1 ]; then
+  cur=§((ip*10+d1)); [ "§d2" -ge 5 ] && cur=§((cur+1))
+  if [ "§cur" -lt "§T" ]; then d=§((T-cur)); K=$inc; else d=§((cur-T)); K=$dec; fi
+  keys=""; i=0
+  while [ "§i" -lt "§d" ]; do keys="§keys §K"; i=§((i+1)); done
+  if [ -n "§keys" ]; then input keyevent §keys; fi
+else
+  input keyevent $rail
+fi
+sleep 0.3
+input keyevent 4$back
+""".trimIndent().replace('§', '$')
+        val cmd = script
         val rc = newProcess(arrayOf("sh", "-c", cmd)).waitFor()
         return if (rc == 0) null else "Key command failed (exit $rc)"
     }
