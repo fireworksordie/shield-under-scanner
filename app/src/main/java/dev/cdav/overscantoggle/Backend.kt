@@ -8,7 +8,7 @@ import kotlin.math.roundToInt
 import rikka.shizuku.Shizuku
 
 /**
- * Sets the Shield's overscan compensation (underscan) in tenths of a percent (25 = 2.5%).
+ * Sets the Shield's underscan (NVIDIA calls it overscan compensation) in tenths of a percent (25 = 2.5%).
  *
  * The only writer for this setting is NVIDIA's OverscanComp app, which runs as the system user and talks to the
  * display HAL; neither the shell user nor a normal app may do that. So we operate that app's slider with key
@@ -28,6 +28,9 @@ object Backend {
     private const val KEY_INCREASE = 20                       // DPAD_DOWN raises the percentage (shrinks the picture)
     private const val KEY_DECREASE = 19                       // DPAD_UP lowers it
     private const val KEY_BACK = 4
+    // NEW_TASK | EXCLUDE_FROM_RECENTS: the stock screen is force-stopped first, so this always creates a fresh task
+    // and the flag keeps it out of the recents list.
+    private const val STOCK_LAUNCH_FLAGS = "0x10800000"
     private const val OPEN_SETTLE_MS = 600L                   // time for the stock screen to read the hardware value
     private const val MAX_ROUNDS = 3
 
@@ -56,7 +59,7 @@ object Backend {
         return p.waitFor() to out
     }
 
-    /** Current overscan in tenths of a percent, read from the system property; null if unreadable. */
+    /** Current underscan in tenths of a percent, read from the system property; null if unreadable. */
     fun readCurrent(): Int? {
         val (rc, out) = shell("getprop $PROP")
         if (rc != 0) return null
@@ -87,11 +90,11 @@ object Backend {
     fun applyNow(target: Int, bringBack: Boolean = false): String? {
         val t = target.coerceIn(0, MAX)
         var cur = try { readCurrent() } catch (e: Exception) { null }
-            ?: return "Could not read the current overscan value"
+            ?: return "Could not read the current underscan value"
         if (cur == t) return null
 
         return try {
-            shell("am force-stop $STOCK_PKG; am start -W -n $STOCK_ACTIVITY")
+            shell("am force-stop $STOCK_PKG; am start -W -f $STOCK_LAUNCH_FLAGS -n $STOCK_ACTIVITY")
             Thread.sleep(OPEN_SETTLE_MS)
 
             var round = 0

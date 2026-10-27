@@ -8,9 +8,9 @@ import android.widget.Toast
 /**
  * Headless entry point for other tools. No UI; toasts the result and closes.
  *
- *   overscan://profile/<name>     apply a saved profile
- *   overscan://set/<tenths>       apply a raw value (25 = 2.5%)
- *   overscan://next               cycle to the next saved profile
+ *   sus://profile/<name>          apply a saved profile
+ *   sus://set/<tenths>            apply a raw value (25 = 2.5%)
+ *   sus://next                    cycle to the next saved profile
  *   (launcher icon / no data)     same as next
  *
  * Intent extras work too, with action dev.cdav.overscantoggle.APPLY:
@@ -20,7 +20,7 @@ class ApplyActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (!Backend.granted()) {
-            Toast.makeText(this, "Overscan: grant Shizuku permission in the app first", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Underscan: grant Shizuku permission in the app first", Toast.LENGTH_LONG).show()
             startActivity(Intent(this, MainActivity::class.java))
             finish()
             return
@@ -52,6 +52,6 @@ class ApplyActivity : Activity() {
 
     private fun run(label: String, t: Int): String {
         val err = Backend.applyNow(t)
-        return if (err == null) "Overscan: $label (${Backend.fmt(Backend.readCurrent() ?: t)})" else "Overscan failed: $err"
+        return if (err == null) "Underscan: $label (${Backend.fmt(Backend.readCurrent() ?: t)})" else "Underscan failed: $err"
     }
 }

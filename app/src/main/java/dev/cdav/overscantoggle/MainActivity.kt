@@ -204,8 +204,8 @@ class MainActivity : Activity() {
 
         root.addView(label(
             "Use from other tools (Tasker, Button Mapper, adb, ...):\n" +
-            "  overscan://profile/<name>    overscan://set/<tenths>    overscan://next\n" +
-            "  adb shell am start -a android.intent.action.VIEW -d \"overscan://profile/Gaming\"",
+            "  sus://profile/<name>    sus://set/<tenths>    sus://next\n" +
+            "  adb shell am start -a android.intent.action.VIEW -d \"sus://profile/Gaming\"",
             14f
         ).apply { setTextColor(Color.LTGRAY); setPadding(0, 32, 0, 0) })
 
@@ -255,7 +255,7 @@ class MainActivity : Activity() {
             val cur = Backend.readCurrent()
             runOnUiThread {
                 if (cur == null) {
-                    status.text = "Could not read the current overscan value."
+                    status.text = "Could not read the current underscan value."
                 } else {
                     setValue(cur, apply = false)
                     status.text = "Current: ${Backend.fmt(cur)}. Changes apply about a second after you stop."
