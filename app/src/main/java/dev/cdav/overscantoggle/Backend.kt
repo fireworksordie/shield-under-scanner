@@ -116,11 +116,15 @@ object Backend {
     private fun applyKeys(ctx: Context, n: Int, bringBack: Boolean): String? {
         val inc = if (flipped(ctx)) 19 else 20
         val dec = if (flipped(ctx)) 20 else 19
-        val keys = if (n == 0) "$inc $dec" else List(n) { "$inc" }.joinToString(" ")
-        // The stock screen keeps its slider position between launches, so kill it first to guarantee it starts at 0.
+        // The stock screen opens with its slider at the CURRENT hardware value, not 0. So first slam the slider
+        // to the nearer end (300 presses is always enough; extra presses are ignored), then step to the target.
+        val seq = if (n <= 150) List(300) { dec } + List(n) { inc }
+                  else List(300) { inc } + List(300 - n) { dec }
+        val keys = seq.joinToString(" ")
+        // Kill the stock screen first so it always starts clean.
         // -W waits until the stock screen is up, so no long fixed sleep is needed.
         val back = if (bringBack) "; am start -n dev.cdav.overscantoggle/.MainActivity" else ""
-        val cmd = "am force-stop com.nvidia.overscancomp; am start -W -n $STOCK_ACTIVITY >/dev/null; sleep 0.3; input keyevent $keys; sleep 0.3; input keyevent 4$back"
+        val cmd = "am force-stop com.nvidia.overscancomp; am start -W -n $STOCK_ACTIVITY >/dev/null; sleep 0.6; input keyevent $keys; sleep 0.3; input keyevent 4$back"
         val rc = newProcess(arrayOf("sh", "-c", cmd)).waitFor()
         return if (rc == 0) null else "Key command failed (exit $rc)"
     }
